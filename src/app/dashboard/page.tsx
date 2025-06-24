@@ -224,7 +224,7 @@ export default function Dashboard() {
               ) : (
                 assignments.map(work => (
                   <Box key={work.id} mb={2}>
-                    <Card>
+                    <Card variant='outlined'>
                       <ListItem
                         secondaryAction={
                           <Button onClick={() => fetchSubmissions(work.id)}>View Submissions</Button>

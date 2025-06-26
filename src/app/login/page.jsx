@@ -14,7 +14,7 @@ export default function LoginPage() {
     setLoading(true);
     setTimeout(() => {
       signIn('google', { callbackUrl: '/dashboard' });
-    }, 1500);
+    }, 1000);
   };
 
   return (

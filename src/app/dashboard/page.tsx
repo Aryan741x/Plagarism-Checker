@@ -19,6 +19,11 @@ import {
   Collapse,
   Button,
   ListItemButton,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Alert
 } from '@mui/material';
 import HomeIcon from '@mui/icons-material/Home';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
@@ -36,6 +41,39 @@ export default function Dashboard() {
   const [loadingAssignments, setLoadingAssignments] = useState(false);
   const [submissionsMap, setSubmissionsMap] = useState<{ [key: string]: any[] | null }>({});
   const [expandedAssignmentId, setExpandedAssignmentId] = useState<string | null>(null);
+  const [extractingId, setExtractingId] = useState<string|null>(null);
+  const [extracted, setExtracted] = useState<any|null>(null);
+  const [extractError, setExtractError] = useState<string|null>(null);
+
+  const handleExtractText = async (fileId:string) =>{
+    setExtractingId(fileId);
+    setExtractError(null);
+    try{
+      const res=await fetch(`/api/drive/extract-text?fileId=${fileId}`);
+      const data=await res.json();
+      if(!res.ok){
+        throw new Error(data.error || 'Failed to extract text');
+      }
+      setExtracted(data);
+    }
+    catch(err){
+      console.log('Error extracting text:', err);
+      if(err instanceof Error){
+        setExtractError(err.message);
+      }
+      else{
+        setExtractError('An unknown error occurred');
+      }
+    }
+    finally{
+      setExtractingId(null);
+    }
+  }
+
+  const getDownloadUrl = (fileId: string) => {
+    if(!fileId) return null;
+    return `https://drive.google.com/uc?export=download&id=${fileId}`;
+  }
 
   const handleCardClick = async (courseId: string) => {
     setSelectedCourseId(courseId);
@@ -269,7 +307,8 @@ export default function Dashboard() {
                                           ))}
 
                                           {/* Action Buttons */}
-                                          <Box mt={1} display="flex" gap={1}>
+                                          <Box mt={1} display="flex" gap={1} flexWrap="wrap">
+                                            {/* Open link in Drive viewer */}
                                             <Button
                                               size="small"
                                               variant="contained"
@@ -278,10 +317,11 @@ export default function Dashboard() {
                                               href={sub.assignmentSubmission.attachments?.[0]?.driveFile?.alternateLink}
                                               target="_blank"
                                               rel="noopener noreferrer"
-                                              startIcon={<span className="material-icons"></span>}
                                             >
                                               Open Submission
                                             </Button>
+
+                                            {/* Bulk-download every attachment in new tabs */}
                                             <Button
                                               size="small"
                                               variant="outlined"
@@ -289,15 +329,26 @@ export default function Dashboard() {
                                               disabled={!sub.assignmentSubmission.attachments?.length}
                                               onClick={() => {
                                                 sub.assignmentSubmission.attachments.forEach((a: any) => {
-                                                  if (a.driveFile?.alternateLink) {
-                                                    window.open(a.driveFile.alternateLink, '_blank');
-                                                  }
+                                                  if (a.driveFile?.alternateLink) window.open(a.driveFile.alternateLink, '_blank');
                                                 });
                                               }}
-                                              startIcon={<span className="material-icons"></span>}
                                             >
-                                             Download 
+                                              Download
                                             </Button>
+
+                                            {/* ⭐ NEW Extract-Text button – one per attachment */}
+                                            {sub.assignmentSubmission.attachments?.map((a: any, i: number) => (
+                                              <Button
+                                                key={`extract-${a.driveFile?.id || i}`}
+                                                size="small"
+                                                variant="outlined"
+                                                color="info"
+                                                disabled={!a.driveFile?.id}
+                                                onClick={() => handleExtractText(a.driveFile.id)}
+                                              >
+                                                {extractingId === a.driveFile?.id ? <CircularProgress size={18} /> : 'Extract Text'}
+                                              </Button>
+                                            ))}
                                           </Box>
                                         </Box>
                                       ) : (
@@ -321,6 +372,33 @@ export default function Dashboard() {
             </Box>
           )}
         </Container>
+        <Dialog
+          open={Boolean(extracted) || Boolean(extractError)}
+          onClose={() => { setExtracted(null); setExtractError(null); }}
+          maxWidth="md"
+          fullWidth
+        >
+          <DialogTitle>
+            {extractError ? 'Extraction Failed' : extracted?.fileName || 'Extracted Text'}
+          </DialogTitle>
+
+          <DialogContent dividers sx={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>
+            {extractError ? (
+              <Alert severity="error">{extractError}</Alert>
+            ) : (
+              extracted?.text || 'No text found.'
+            )}
+          </DialogContent>
+
+          <DialogActions>
+            <Button
+              onClick={() => { setExtracted(null); setExtractError(null); }}
+              color="primary"
+            >
+              Close
+            </Button>
+          </DialogActions>
+        </Dialog>
       </Box>
     </Box>
   );

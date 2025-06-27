@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
 
     let text = '';
 
-    /* ------------ PDF via pdf2json ---------------- */
+    /* ---------- PDF via pdf2json(Y-row) ---------------- */
     if (realMime === 'application/pdf') {
       text = await new Promise<string>((resolve, reject) => {
         const pdfParser = new PDFParser();
@@ -65,24 +65,38 @@ export async function GET(req: NextRequest) {
         pdfParser.on('pdfParser_dataError', e => reject(e.parserError));
 
         pdfParser.on('pdfParser_dataReady', (pdf: any) => {
-          const raw = pdf.Pages            // <-- new shape
-            .map((page: any) =>
-              page.Texts
-                .map((t: any) =>
-                  decodeURIComponent(
-                    t.R.map((r: any) => r.T).join('')
-                  )
-                )
-                .join(' ')
-            )
-            .join('\n');
-          resolve(raw.trim());
+          const pagesText: string[] = [];
+
+          for (const page of pdf.Pages) {
+            // 1) bucket words by rounded Y
+            const rows: Record<number, { x: number; str: string }[]> = {};
+            for (const t of page.Texts) {
+              const y = Math.round(t.y);          // line row
+              const x = t.x;                      // left position
+              const str = decodeURIComponent(t.R.map((r: any) => r.T).join(''));
+              (rows[y] ??= []).push({ x, str });
+            }
+
+            // 2) turn rows into one line each
+            const lines = Object.entries(rows)
+              .sort(([y1], [y2]) => Number(y1) - Number(y2))       // top-to-bottom
+              .map(([, words]) =>
+                words
+                  .sort((a, b) => a.x - b.x)                       // left-to-right
+                  .map(w => w.str)
+                  .join(' ')
+              )
+              .join('\n');
+
+            pagesText.push(lines);
+          }
+
+          resolve(pagesText.join('\n').trim());
         });
 
         pdfParser.parseBuffer(buf);
       });
-}
-
+    }
     /* ------------ DOCX ---------------------------- */
     else if (
       realMime ===

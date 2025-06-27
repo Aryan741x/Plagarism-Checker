@@ -1,52 +1,112 @@
 // src/app/api/drive/extract-text/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { getToken } from 'next-auth/jwt';
+import { google } from 'googleapis';
+import mammoth from 'mammoth';
+import { fileTypeFromBuffer } from 'file-type';
+import PDFParser from 'pdf2json';          // ← NEW
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest) {
-  /* 1. Auth */
-  const token = await getToken({ req });
-  const accessToken = token?.accessToken;
-  const userEmail   = (token as any)?.email || 'unknown';
+const send = (d: any, s = 200) => NextResponse.json(d, { status: s });
 
-  if (!accessToken) {
-    return NextResponse.json(
-      { stage: 'auth', ok: false, message: 'No access token' },
-      { status: 401 }
-    );
-  }
+/* -------- Drive download / export helper ---------------- */
+async function download(
+  fileId: string,
+  token: string
+): Promise<{ buf: Buffer; name: string; mime: string }> {
+  const auth = new google.auth.OAuth2();
+  auth.setCredentials({ access_token: token });
+  const drive = google.drive({ version: 'v3', auth });
 
-  /* 2. Param */
-  const fileId = req.nextUrl.searchParams.get('fileId');
-  if (!fileId) {
-    return NextResponse.json(
-      { stage: 'param', ok: false, message: 'fileId missing' },
-      { status: 400 }
-    );
-  }
-
-  /* 3. Ping Drive metadata to see what Drive says */
-  const metaUrl =
-    `https://www.googleapis.com/drive/v3/files/${fileId}` +
-    '?fields=name,mimeType&supportsAllDrives=true';
-
-  const metaRes  = await fetch(metaUrl, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  const metaBody = await metaRes.text();        // always read the body
-
-  /* 4. Return *everything* so you can inspect it */
-  return NextResponse.json({
-    ok: metaRes.ok,
-    status: metaRes.status,        // 404, 403, etc.
-    stage: 'google-drive-metadata',
+  const meta = await drive.files.get({
     fileId,
-    requestedBy: userEmail,
-    metaUrl,
-    driveResponseBody: metaBody,   // Google’s own JSON error or metadata
-    hint: metaRes.ok
-      ? 'Drive found the file. Full extraction logic is safe to run.'
-      : 'Drive did NOT find the file. Check fileId, sharing, or supportsAllDrives.',
+    fields: 'name,mimeType',
+    supportsAllDrives: true,
   });
+  const { name, mimeType } = meta.data;
+
+  if (mimeType?.startsWith('application/vnd.google-apps.')) {
+    const exp = await drive.files.export(
+      { fileId, mimeType: 'text/plain' },
+      { responseType: 'arraybuffer' }
+    );
+    return { buf: Buffer.from(exp.data as ArrayBuffer), name: name!, mime: 'text/plain' };
+  }
+
+  const dl = await drive.files.get(
+    { fileId, alt: 'media', supportsAllDrives: true },
+    { responseType: 'arraybuffer' }
+  );
+  return { buf: Buffer.from(dl.data as ArrayBuffer), name: name!, mime: mimeType! };
+}
+
+/* -------------------- Route ----------------------------- */
+export async function GET(req: NextRequest) {
+  const token = await getToken({ req });
+  if (!token?.accessToken) return send({ error: 'unauthorized' }, 401);
+
+  const fileId = req.nextUrl.searchParams.get('fileId');
+  if (!fileId) return send({ error: 'fileId missing' }, 400);
+
+  try {
+    const { buf, name, mime } = await download(fileId, token.accessToken as string);
+    const sniff = await fileTypeFromBuffer(buf);
+    const realMime = sniff?.mime || mime;
+
+    let text = '';
+
+    /* ------------ PDF via pdf2json ---------------- */
+    if (realMime === 'application/pdf') {
+      text = await new Promise<string>((resolve, reject) => {
+        const pdfParser = new PDFParser();
+
+        pdfParser.on('pdfParser_dataError', e => reject(e.parserError));
+
+        pdfParser.on('pdfParser_dataReady', (pdf: any) => {
+          const raw = pdf.Pages            // <-- new shape
+            .map((page: any) =>
+              page.Texts
+                .map((t: any) =>
+                  decodeURIComponent(
+                    t.R.map((r: any) => r.T).join('')
+                  )
+                )
+                .join(' ')
+            )
+            .join('\n');
+          resolve(raw.trim());
+        });
+
+        pdfParser.parseBuffer(buf);
+      });
+}
+
+    /* ------------ DOCX ---------------------------- */
+    else if (
+      realMime ===
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    ) {
+      text = (await mammoth.extractRawText({ buffer: buf })).value.trim();
+    }
+    /* ------------ Plain-text ---------------------- */
+    else if (realMime.startsWith('text/')) {
+      text = buf.toString('utf-8').trim();
+    }
+    /* ------------ Unsupported --------------------- */
+    else {
+      return send({ error: `unsupported mime ${realMime}` }, 415);
+    }
+
+    return send({
+      fileName: name,
+      mimeType: realMime,
+      text: text || '(no selectable text)',
+    });
+  } catch (err: any) {
+    console.error('[extract-text]', err);
+    const status = err.code === 404 || err.code === 403 ? err.code : 500;
+    return send({ error: err.message }, status);
+  }
 }

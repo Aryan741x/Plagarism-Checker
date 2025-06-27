@@ -50,20 +50,21 @@ export default function Dashboard() {
     setExtractError(null);
     try{
       const res=await fetch(`/api/drive/extract-text?fileId=${fileId}`);
-      const data=await res.json();
-      if(!res.ok){
-        throw new Error(data.error || 'Failed to extract text');
-      }
+      const data = await res.json();
+      console.log('Extracted data:', data);
+      // if(!res.ok){
+      //   throw new Error(data.error || 'Failed to extract text');
+      // }
       setExtracted(data);
     }
     catch(err){
       console.log('Error extracting text:', err);
-      if(err instanceof Error){
-        setExtractError(err.message);
-      }
-      else{
-        setExtractError('An unknown error occurred');
-      }
+      // if(err instanceof Error){
+      //   setExtractError(err.message);
+      // }
+      // else{
+      //   setExtractError('An unknown error occurred');
+      // }
     }
     finally{
       setExtractingId(null);

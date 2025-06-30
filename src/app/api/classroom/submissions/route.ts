@@ -20,19 +20,38 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  const allSubmissions: any[] = [];
+  let pageToken: string | undefined = undefined;
+
   try {
-    const res = await fetch(
-      `https://classroom.googleapis.com/v1/courses/${courseId}/courseWork/${courseWorkId}/studentSubmissions`,
-      {
+    do {
+      const url = new URL(
+        `https://classroom.googleapis.com/v1/courses/${courseId}/courseWork/${courseWorkId}/studentSubmissions`
+      );
+      url.searchParams.set('pageSize', '100');
+      if (pageToken) url.searchParams.set('pageToken', pageToken);
+
+      const res = await fetch(url.toString(), {
         headers: {
           Authorization: `Bearer ${token.accessToken}`,
         },
-      }
-    );
+      });
 
-    const data = await res.json();
-    console.log('Submissions data:', data);
-    return NextResponse.json(data);
+      if (!res.ok) {
+        throw new Error(`Google API error: ${res.status} ${res.statusText}`);
+      }
+
+      const data = await res.json();
+
+      if (Array.isArray(data.studentSubmissions)) {
+        allSubmissions.push(...data.studentSubmissions);
+      }
+
+      pageToken = data.nextPageToken;
+    } while (pageToken);
+
+    console.log('Fetched', allSubmissions.length, 'submissions');
+    return NextResponse.json({ studentSubmissions: allSubmissions });
   } catch (err: any) {
     console.error('Google API error:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });

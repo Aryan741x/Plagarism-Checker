@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import useSWR from 'swr';
 import {
   Box,
@@ -32,8 +32,17 @@ import FolderIcon from '@mui/icons-material/Folder';
 import { useRouter } from 'next/navigation';
 
 const fetcher = (url: string) => fetch(url).then(res => res.json());
+type PlagiarismResult = {
+  source: string;
+  target: string;
+  similarity: number;
+};
 
 export default function Dashboard() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   const router = useRouter();
   const { data, error, isLoading } = useSWR('/api/classroom/courses', fetcher);
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
@@ -44,6 +53,10 @@ export default function Dashboard() {
   const [extractingId, setExtractingId] = useState<string|null>(null);
   const [extracted, setExtracted] = useState<any|null>(null);
   const [extractError, setExtractError] = useState<string|null>(null);
+  const [plagLoading, setPlagLoading] = useState(false);
+  const [plagError, setPlagError] = useState<string | null>(null);
+  const [plagResult, setPlagResult] = useState<any | null>(null);
+  const [activePlagCheckKey, setActivePlagCheckKey] = useState<string | null>(null);
 
   const handleExtractText = async (fileId:string) =>{
     setExtractingId(fileId);
@@ -52,28 +65,23 @@ export default function Dashboard() {
       const res=await fetch(`/api/drive/extract-text?fileId=${fileId}`);
       const data = await res.json();
       console.log('Extracted data:', data);
-      // if(!res.ok){
-      //   throw new Error(data.error || 'Failed to extract text');
-      // }
+      if(!res.ok){
+        throw new Error(data.error || 'Failed to extract text');
+      }
       setExtracted(data);
     }
     catch(err){
       console.log('Error extracting text:', err);
-      // if(err instanceof Error){
-      //   setExtractError(err.message);
-      // }
-      // else{
-      //   setExtractError('An unknown error occurred');
-      // }
+      if(err instanceof Error){
+        setExtractError(err.message);
+      }
+      else{
+        setExtractError('An unknown error occurred');
+      }
     }
     finally{
       setExtractingId(null);
     }
-  }
-
-  const getDownloadUrl = (fileId: string) => {
-    if(!fileId) return null;
-    return `https://drive.google.com/uc?export=download&id=${fileId}`;
   }
 
   const handleCardClick = async (courseId: string) => {
@@ -93,8 +101,48 @@ export default function Dashboard() {
     setLoadingAssignments(false);
   };
 
+  const runInternalPlag = async(courseId: string, courseWorkId: string) => {
+      setActivePlagCheckKey(`${courseId}:${courseWorkId}`);
+      setPlagLoading(true);
+      setPlagError(null);
+      setPlagResult(null);
+      try{
+        const res=await fetch(`/api/plagiarism/internal?courseId=${courseId}&courseWorkId=${courseWorkId}`);
+        const data = await res.json();
+        if(!res.ok){
+          throw new Error(data.error || 'Failed to run plagiarism check');
+        }
+        console.log('Plagiarism data:', data.extracted);
+        const cmpRes=await fetch('/api/plagiarism/internal/compare', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ documents: data.extracted || [] }),
+        });
+        const cmpData = await cmpRes.json();
+        if(!cmpRes.ok){
+          throw new Error(cmpData.error || 'Failed to compare documents');
+        }
+        console.log('Comparison result:', cmpData);
+        setPlagResult(cmpData);
+      }catch(err){
+        console.error('Error running plagiarism check:', err);
+        if(err instanceof Error){
+          setPlagError(err.message);
+        } else {
+          setPlagError('An unknown error occurred');
+        }
+      }finally{
+        setPlagLoading(false);
+        setActivePlagCheckKey(null);
+      }
+  }
+  const driveDownload= (fileId: string) => `https://drive.google.com/uc?export=download&id=${fileId}`;
   const fetchSubmissions = async (courseWorkId: string) => {
     if (!selectedCourseId || !courseWorkId) return;
+    if(expandedAssignmentId === courseWorkId) {
+      setExpandedAssignmentId(null);
+      return;
+    }
 
     setSubmissionsMap(prev => ({ ...prev, [courseWorkId]: null }));
     setExpandedAssignmentId(courseWorkId);
@@ -264,29 +312,54 @@ export default function Dashboard() {
                 assignments.map(work => (
                   <Box key={work.id} mb={2}>
                     <Card variant='outlined'>
-                      <ListItem
-                        secondaryAction={
-                          <Button onClick={() => fetchSubmissions(work.id)}>View Submissions</Button>
-                        }
+                      <Box
+                        px={2} py={2}
+                        sx={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          flexWrap: 'wrap',
+                          rowGap: 1
+                        }}
                       >
-                        <ListItemText
-                          primary={work.title}
-                          secondary={work.description || 'No description'}
-                        />
-                      </ListItem>
-                      <Collapse in={expandedAssignmentId === work.id} timeout="auto" unmountOnExit>
+                        <Box>
+                          <Typography variant="subtitle1" fontWeight="bold">
+                            {work.title}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            {work.description || 'No description'}
+                          </Typography>
+                        </Box>
+                          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                            <Button variant='text' sx={{color: '#1976d2', fontWeight: 'bold'}} onClick={() => fetchSubmissions(work.id)}>View Submissions</Button>
+                            <Button
+                              variant="outlined"
+                              sx={{ color: '#f57c00', borderColor: '#f57c00' }}
+                              disabled={activePlagCheckKey!=null}
+                              onClick={() => runInternalPlag(selectedCourseId!, work.id)}
+                            >
+                              {activePlagCheckKey === `${selectedCourseId}:${work.id}` ? (
+                                <CircularProgress size={18} />
+                              ) : (
+                                'Internal Plagiarism Check'
+                              )}
+                            </Button>
+                          </Box>
+                      </Box>
+                      {mounted &&(<Collapse in={expandedAssignmentId === work.id} timeout="auto" unmountOnExit>
                         <Box ml={4} mb={2}>
                           {submissionsMap[work.id] === null ? (
                             <CircularProgress size={20} />
                           ) : submissionsMap[work.id]?.length ? (
                             <List dense>
                               {(submissionsMap[work.id] ?? []).map((sub: any) => (
-                                <ListItem key={sub.id} alignItems="flex-start">
-                                  <ListItemText
-                                    primary={`User ID: ${sub.userId || 'Unknown'}`}
-                                    secondary={
-                                      sub.assignmentSubmission?.attachments?.length ? (
-                                        <Box>
+                                <ListItem key={sub.id} alignItems="flex-start" sx={{ display: 'block' }}>
+                                    <Box sx={{ flexGrow: 1 }}>
+                                      <Typography variant="subtitle1">
+                                        User ID: {sub.userId || 'Unknown'}
+                                      </Typography>
+                                      {sub.assignmentSubmission?.attachments?.length ? (
+                                        <Box mt={1}>
                                           <Typography variant="body2" gutterBottom>
                                             Attachments:
                                           </Typography>
@@ -306,7 +379,7 @@ export default function Dashboard() {
                                               </a>
                                             </Typography>
                                           ))}
-
+                                        
                                           {/* Action Buttons */}
                                           <Box mt={1} display="flex" gap={1} flexWrap="wrap">
                                             {/* Open link in Drive viewer */}
@@ -330,7 +403,8 @@ export default function Dashboard() {
                                               disabled={!sub.assignmentSubmission.attachments?.length}
                                               onClick={() => {
                                                 sub.assignmentSubmission.attachments.forEach((a: any) => {
-                                                  if (a.driveFile?.alternateLink) window.open(a.driveFile.alternateLink, '_blank');
+                                                  const id = a.driveFile?.id;
+                                                  if (id) window.open(driveDownload(id), '_blank');
                                                 });
                                               }}
                                             >
@@ -354,9 +428,8 @@ export default function Dashboard() {
                                         </Box>
                                       ) : (
                                         <Typography variant="body2">No attachments</Typography>
-                                      )
-                                    }
-                                  />
+                                      )}
+                                    </Box>
                                 </ListItem>
                               ))}
                             </List>
@@ -365,7 +438,7 @@ export default function Dashboard() {
                           )}
                         </Box>
                       </Collapse>
-
+                      )}
                     </Card>
                   </Box>
                 ))
@@ -400,6 +473,42 @@ export default function Dashboard() {
             </Button>
           </DialogActions>
         </Dialog>
+        <Dialog
+          open={Boolean(plagResult) || Boolean(plagError)}
+          onClose={() => { setPlagResult(null); setPlagError(null); }}
+          maxWidth="md"
+          fullWidth
+        >
+          <DialogTitle>Internal Plagiarism Report</DialogTitle>
+
+          <DialogContent dividers sx={{ whiteSpace: 'pre-wrap' }}>
+            {plagLoading && <CircularProgress />}
+            {plagError && <Alert severity="error">{plagError}</Alert>}
+            {plagResult && (
+              plagResult.length === 0 ? (
+                <Alert severity="success">No significant matches found 🎉</Alert>
+              ) : (
+                <List dense>
+                  {plagResult.map((r:PlagiarismResult, i:number) => (
+                    <ListItem key={i}>
+                      <ListItemText
+                        primary={`Match: ${r.source} ↔ ${r.target}`}
+                        secondary={`Similarity: ${(r.similarity * 100).toFixed(2)}%`}
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              )
+            )}
+          </DialogContent>
+
+          <DialogActions>
+            <Button onClick={() => { setPlagResult(null); setPlagError(null); }}>
+              Close
+            </Button>
+          </DialogActions>
+        </Dialog>
+
       </Box>
     </Box>
   );

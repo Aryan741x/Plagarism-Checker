@@ -23,13 +23,19 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  Alert
+  Alert,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem
 } from '@mui/material';
 import HomeIcon from '@mui/icons-material/Home';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import FolderIcon from '@mui/icons-material/Folder';
 import { useRouter } from 'next/navigation';
+import { language } from 'googleapis/build/src/apis/language';
+import { file } from 'googleapis/build/src/apis/file';
 
 const fetcher = (url: string) => fetch(url).then(res => res.json());
 type PlagiarismResult = {
@@ -57,7 +63,9 @@ export default function Dashboard() {
   const [plagError, setPlagError] = useState<string | null>(null);
   const [plagResult, setPlagResult] = useState<any | null>(null);
   const [activePlagCheckKey, setActivePlagCheckKey] = useState<string | null>(null);
-
+  const [selectedLang, setSelectedLang] = useState<"text"|"python">("text");
+  const [fileIdNameMap, setFileIdNameMap] = useState<Record<string,string>>({});
+  
   const handleExtractText = async (fileId:string) =>{
     setExtractingId(fileId);
     setExtractError(null);
@@ -107,22 +115,25 @@ export default function Dashboard() {
       setPlagError(null);
       setPlagResult(null);
       try{
-        const res=await fetch(`/api/plagiarism/internal?courseId=${courseId}&courseWorkId=${courseWorkId}`);
+        const res=await fetch(`/api/plagiarism/internal?courseId=${courseId}&courseWorkId=${courseWorkId}&language=${selectedLang}`,);
         const data = await res.json();
         if(!res.ok){
           throw new Error(data.error || 'Failed to run plagiarism check');
         }
-        console.log('Plagiarism data:', data.extracted);
+        const idName: Record<string, string> = {};
+        (data.extracted as any[]).forEach(d => { idName[d.fileId] = d.fileName ?? d.fileId; });
+        setFileIdNameMap(idName);
+        // console.log('Plagiarism data:', data.extracted);
         const cmpRes=await fetch('/api/plagiarism/internal/compare', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ documents: data.extracted || [] }),
+          body: JSON.stringify({ documents: data.extracted || [], language: selectedLang }),
         });
         const cmpData = await cmpRes.json();
         if(!cmpRes.ok){
           throw new Error(cmpData.error || 'Failed to compare documents');
         }
-        console.log('Comparison result:', cmpData);
+        // console.log('Comparison result:', cmpData);
         setPlagResult(cmpData);
       }catch(err){
         console.error('Error running plagiarism check:', err);
@@ -136,6 +147,11 @@ export default function Dashboard() {
         setActivePlagCheckKey(null);
       }
   }
+  const prettyName = (idString: string) => {
+    const fileId=idString.split(":")[1]?.trim();
+    return fileIdNameMap[fileId] || fileId || 'Unknown File';
+  };
+
   const driveDownload= (fileId: string) => `https://drive.google.com/uc?export=download&id=${fileId}`;
   const fetchSubmissions = async (courseWorkId: string) => {
     if (!selectedCourseId || !courseWorkId) return;
@@ -331,6 +347,17 @@ export default function Dashboard() {
                           </Typography>
                         </Box>
                           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                            <FormControl size="small" sx={{ minWidth: 120 }}>
+                              <InputLabel>Lang</InputLabel>
+                              <Select
+                                label="Lang"
+                                value={selectedLang}
+                                onChange={(e) => setSelectedLang(e.target.value as any)}
+                              >
+                                <MenuItem value="text">Generic Text</MenuItem>
+                                <MenuItem value="python">Python</MenuItem>
+                              </Select>
+                            </FormControl>
                             <Button variant='text' sx={{color: '#1976d2', fontWeight: 'bold'}} onClick={() => fetchSubmissions(work.id)}>View Submissions</Button>
                             <Button
                               variant="outlined"
@@ -485,20 +512,28 @@ export default function Dashboard() {
             {plagLoading && <CircularProgress />}
             {plagError && <Alert severity="error">{plagError}</Alert>}
             {plagResult && (
-              plagResult.length === 0 ? (
-                <Alert severity="success">No significant matches found 🎉</Alert>
-              ) : (
-                <List dense>
-                  {plagResult.map((r:PlagiarismResult, i:number) => (
-                    <ListItem key={i}>
-                      <ListItemText
-                        primary={`Match: ${r.source} ↔ ${r.target}`}
-                        secondary={`Similarity: ${(r.similarity * 100).toFixed(2)}%`}
-                      />
-                    </ListItem>
-                  ))}
-                </List>
-              )
+              <div>
+                {plagResult.invalid?.length > 0 && (
+                  <Alert severity="warning" sx={{ mb: 2 }}>
+                    Skipped {plagResult.invalid.length} submissions (wrong language)
+                  </Alert>
+                )}
+
+                {Array.isArray(plagResult.matches) && plagResult.matches.length === 0 ? (
+                  <Alert severity="success">No significant matches found 🎉</Alert>
+                ) : (
+                  <List dense>
+                    {plagResult.matches?.map((m: PlagiarismResult, i: number) => (
+                      <ListItem key={i}>
+                        <ListItemText
+                          primary={`Match: ${prettyName(m.source)} ↔ ${prettyName(m.target)}`}
+                          secondary={`Similarity: ${(m.similarity * 100).toFixed(2)}%`}
+                        />
+                      </ListItem>
+                    ))}
+                  </List>
+                )}
+              </div>
             )}
           </DialogContent>
 

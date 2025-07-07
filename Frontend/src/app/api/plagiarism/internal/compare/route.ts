@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json(); // Expecting { documents: [...] }
-
+    const body = await req.json(); //{language,documents}
+    // console.log('[flask-compare] Received body:', body);
     const flaskRes = await fetch('http://localhost:5000/internal-plagiarism', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

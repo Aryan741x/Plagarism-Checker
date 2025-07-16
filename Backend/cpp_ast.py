@@ -1,9 +1,14 @@
+import platform
 import subprocess
 import os
 from difflib import SequenceMatcher
 from itertools import combinations
+import platform
 
-CTAGS_EXE = os.environ.get("CTAGS_PATH", "bin/ctags.exe")  # relative fallback
+if platform.system() == "Windows":
+    CTAGS_EXE = os.environ.get("CTAGS_PATH", "bin/ctags.exe")  # relative fallback
+else:
+    CTAGS_EXE = "ctags"
 
 def extract_tokens(code: str) -> list[str]:
     with open("temp.cpp", "w", encoding="utf-8") as f:

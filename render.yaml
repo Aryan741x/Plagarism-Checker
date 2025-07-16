@@ -1,11 +1,11 @@
 services:
   - type: web
-    name: plag-backend
+    name: plag-checker-backend
     env: python
     plan: free
-    buildCommand: pip install -r Backend/requirements.txt
-    startCommand: gunicorn -w 1 -b 0.0.0.0:$PORT main:app
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn wsgi:app
+    workingDir: Backend
     envVars:
       - key: CTAGS_PATH
         value: bin/ctags.exe
-    workingDir: Backend

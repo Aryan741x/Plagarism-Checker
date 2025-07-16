@@ -7,5 +7,7 @@ services:
     startCommand: gunicorn wsgi:app
     workingDir: Backend
     envVars:
+      - key: PORT
+        value: 10000
       - key: CTAGS_PATH
-        value: bin/ctags.exe
+        value: ../bin/ctags.exe

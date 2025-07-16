@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import useSWR from 'swr';
+import { usePathname } from 'next/navigation';
 import {
   Box,
   Container,
@@ -30,12 +31,10 @@ import {
   MenuItem
 } from '@mui/material';
 import HomeIcon from '@mui/icons-material/Home';
-import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
+// import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import FolderIcon from '@mui/icons-material/Folder';
 import { useRouter } from 'next/navigation';
-import { language } from 'googleapis/build/src/apis/language';
-import { file } from 'googleapis/build/src/apis/file';
 
 const fetcher = (url: string) => fetch(url).then(res => res.json());
 type PlagiarismResult = {
@@ -45,6 +44,7 @@ type PlagiarismResult = {
 };
 
 export default function Dashboard() {
+  const pathname = usePathname();
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
     setMounted(true);
@@ -63,8 +63,12 @@ export default function Dashboard() {
   const [plagError, setPlagError] = useState<string | null>(null);
   const [plagResult, setPlagResult] = useState<any | null>(null);
   const [activePlagCheckKey, setActivePlagCheckKey] = useState<string | null>(null);
-  const [selectedLang, setSelectedLang] = useState<"text"|"python">("text");
+  const [selectedLang, setSelectedLang] = useState<"text"|"python"|"java"|"cpp"|"javascript">("text");
   const [fileIdNameMap, setFileIdNameMap] = useState<Record<string,string>>({});
+  const [aiDetectLoading, setAIDetectLoading] = useState(false);
+  const [aiDetectError, setAIDetectError] = useState<string | null>(null);
+  const [aiResults, setAIResults] = useState<{ fileId: string; isAI: boolean }[] | null>(null);
+
   
   const handleExtractText = async (fileId:string) =>{
     setExtractingId(fileId);
@@ -147,10 +151,61 @@ export default function Dashboard() {
         setActivePlagCheckKey(null);
       }
   }
-  const prettyName = (idString: string) => {
-    const fileId=idString.split(":")[1]?.trim();
-    return fileIdNameMap[fileId] || fileId || 'Unknown File';
+
+  const runExternalAICheck = async(courseId: string, courseWorkId: string) => {
+    setAIDetectLoading(true);
+    setAIDetectError(null);
+    setAIResults(null);
+
+    try {
+      const res = await fetch(`/api/plagiarism/external?courseId=${courseId}&courseWorkId=${courseWorkId}`);
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to run AI detection');
+      }
+
+      setFileIdNameMap(() => {
+        const idName: Record<string, string> = {};
+        (data.extracted || []).forEach((d: any) => {
+          idName[d.fileId] = d.fileName ?? d.fileId;
+        });
+        return idName;
+      });
+
+      // Send texts to detect-ai batch endpoint
+      const detectRes = await fetch('/api/plagiarism/external/compare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documents: data.extracted }),
+      });
+
+      const detectData = await detectRes.json();
+      if (!detectRes.ok) {
+        throw new Error(detectData.error || 'AI Detection failed');
+      }
+      console.log('AI Detection results:', detectData);
+      setAIResults(detectData.results || []);
+    } catch (err) {
+      // console.error('Error running external AI detection:', err);
+      setAIResults(null);
+      setAIDetectError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setAIDetectLoading(false);
+    }
   };
+  
+  const resolveFileName = (fileId: string | undefined) => {
+    if (!fileId || typeof fileId !== "string") return "Unknown File";
+    return fileIdNameMap[fileId] || fileId || "Unknown File";
+  };
+
+  const prettyName = (idString: string | undefined) => {
+    if (!idString || typeof idString !== "string") return "Unknown File";
+    const fileId = idString.split(":")[1]?.trim() || idString;
+    return fileIdNameMap[fileId] || fileId || "Unknown File";
+  };
+
 
   const driveDownload= (fileId: string) => `https://drive.google.com/uc?export=download&id=${fileId}`;
   const fetchSubmissions = async (courseWorkId: string) => {
@@ -178,13 +233,22 @@ export default function Dashboard() {
     }
   };
 
-  if (isLoading) {
+  if (!mounted || isLoading) {
     return (
-      <Box p={4}>
-        <CircularProgress />
+      <Box
+        sx={{
+          height: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          bgcolor: '#f5f5f5',
+        }}
+      >
+        <CircularProgress size={60} color="primary" />
       </Box>
     );
   }
+
 
   if (error) {
     return (
@@ -195,7 +259,7 @@ export default function Dashboard() {
   }
 
   return (
-    <Box sx={{ display: 'flex', bgcolor: '#e3f2fd', minHeight: '100vh' }}>
+    <Box sx={{ display: 'flex', bgcolor: '#e3f2fd', minHeight: '100vh', opacity: mounted ? 1 : 0, transition: 'opacity 0.3s ease-in-out' }}>
       {/* Sidebar Drawer */}
       <Drawer variant="permanent" sx={{ width: 240, flexShrink: 0 }}>
         <Box sx={{ width: 240, bgcolor: '#ffffff', height: '100vh', borderRight: '1px solid #ccc' }}>
@@ -206,13 +270,9 @@ export default function Dashboard() {
           </Box>
           <Divider />
           <List>
-            <ListItemButton selected>
+            <ListItemButton selected={pathname=== '/dashboard'} onClick={() => router.push('/dashboard')}>
               <ListItemIcon><HomeIcon /></ListItemIcon>
               <ListItemText primary="Home" />
-            </ListItemButton>
-            <ListItemButton onClick={() => router.push('/calendar')}>
-              <ListItemIcon><CalendarTodayIcon /></ListItemIcon>
-              <ListItemText primary="Calendar" />
             </ListItemButton>
             <ListItem>
               <ListItemText primary="Enrolled" />
@@ -356,6 +416,9 @@ export default function Dashboard() {
                               >
                                 <MenuItem value="text">Generic Text</MenuItem>
                                 <MenuItem value="python">Python</MenuItem>
+                                <MenuItem value="java">Java</MenuItem>
+                                <MenuItem value="cpp">C / C++</MenuItem>
+                                <MenuItem value="javascript">JavaScript</MenuItem>
                               </Select>
                             </FormControl>
                             <Button variant='text' sx={{color: '#1976d2', fontWeight: 'bold'}} onClick={() => fetchSubmissions(work.id)}>View Submissions</Button>
@@ -370,6 +433,14 @@ export default function Dashboard() {
                               ) : (
                                 'Internal Plagiarism Check'
                               )}
+                            </Button>
+                            <Button
+                              variant="outlined"
+                              sx={{ color: '#2e7d32', borderColor: '#2e7d32' }}
+                              disabled={aiDetectLoading}
+                              onClick={() => runExternalAICheck(selectedCourseId!, work.id)}
+                            >
+                              {aiDetectLoading ? <CircularProgress size={18} /> : 'External AI Detection'}
                             </Button>
                           </Box>
                       </Box>
@@ -515,7 +586,8 @@ export default function Dashboard() {
               <div>
                 {plagResult.invalid?.length > 0 && (
                   <Alert severity="warning" sx={{ mb: 2 }}>
-                    Skipped {plagResult.invalid.length} submissions (wrong language)
+                    Skipped wrong-language files:<br/>
+                    {plagResult.invalid.join(", ")}
                   </Alert>
                 )}
 
@@ -536,14 +608,44 @@ export default function Dashboard() {
               </div>
             )}
           </DialogContent>
-
           <DialogActions>
             <Button onClick={() => { setPlagResult(null); setPlagError(null); }}>
               Close
             </Button>
           </DialogActions>
         </Dialog>
-
+        <Dialog
+            open={Boolean(aiResults) || Boolean(aiDetectError)}
+            onClose={() => { setAIResults(null); setAIDetectError(null); }}
+            maxWidth="md"
+            fullWidth
+          >
+            <DialogTitle>AI Content Detection</DialogTitle>
+            <DialogContent dividers sx={{ whiteSpace: 'pre-wrap' }}>
+              {aiDetectLoading && <CircularProgress />}
+              {aiDetectError && <Alert severity="error">{aiDetectError}</Alert>}
+              {aiResults && (
+                <List dense>
+                  {aiResults.map((res, i) => (
+                    <ListItem key={i}>
+                      <ListItemText
+                        primary={resolveFileName(res?.fileId)}
+                        secondary={res.isAI ? "❌ Likely AI-generated" : "✅ Human-written"}
+                        secondaryTypographyProps={{
+                          color: res.isAI ? 'error' : 'success.main',
+                        }}
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              )}
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => { setAIResults(null); setAIDetectError(null); }}>
+                Close
+              </Button>
+            </DialogActions>
+          </Dialog>
       </Box>
     </Box>
   );

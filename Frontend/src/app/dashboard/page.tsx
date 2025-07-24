@@ -417,7 +417,8 @@ export default function Dashboard() {
                                 <MenuItem value="text">Generic Text</MenuItem>
                                 <MenuItem value="python">Python</MenuItem>
                                 <MenuItem value="java">Java</MenuItem>
-                                <MenuItem value="cpp">C / C++</MenuItem>
+                                <MenuItem value="cpp">C++</MenuItem>
+                                <MenuItem value="c">C</MenuItem>
                                 <MenuItem value="javascript">JavaScript</MenuItem>
                               </Select>
                             </FormControl>

@@ -1,11 +1,9 @@
-// src/app/api/drive/extract-text/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { getToken } from 'next-auth/jwt';
 import { google } from 'googleapis';
 import mammoth from 'mammoth';
 import { fileTypeFromBuffer } from 'file-type';
-import PDFParser from 'pdf2json';          // ← NEW
-
+import PDFParser from 'pdf2json';     
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 

@@ -8,6 +8,7 @@ from java_ast import matches as java_matches
 from cpp_ast import matches as cpp_matches
 from js_ast import matches as js_matches
 from detect_ai import detect_ai
+from c_ast import matches as c_matches
 
 routes = Blueprint("routes", __name__)
 
@@ -16,7 +17,8 @@ EXTS = {
     "java": (".java",),
     "cpp": (".cpp", ".cc", ".cxx", ".hpp", ".h"),
     "javascript": (".js", ".jsx", ".mjs"),
-    "text": tuple(),  # treat every file as “text”
+    "text": tuple(),
+    "c": (".c", ".h"),
 }
 
 ALGOS = {
@@ -24,6 +26,7 @@ ALGOS = {
     "java": java_matches,
     "cpp": lambda d: cpp_matches(d, threshold=0.6),
     "javascript": js_matches,
+    "c": lambda d: c_matches(d, threshold=0.6,alpha=0.5),
 }
 
 def normalize(t: str) -> str:

@@ -7,7 +7,8 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json(); //{language,documents}
     // console.log('[flask-compare] Received body:', body);
-    const flaskRes = await fetch('http://localhost:5000/internal-plagiarism', {
+    const BASE_URL = process.env.BASE_URL || 'http://localhost:5000';
+    const flaskRes = await fetch(`${BASE_URL}/internal-plagiarism`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

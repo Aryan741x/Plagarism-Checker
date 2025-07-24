@@ -5,7 +5,9 @@ export async function POST(request: NextRequest) {
     if (!documents || !Array.isArray(documents)) {
       return NextResponse.json({ error: 'Invalid input' }, { status: 400 });
     }
-    const flaskRes = await fetch('http://localhost:5000/detect-ai/batch', {
+    // const BASE_URL = process.env.BASE_URL || 'http://localhost:5000';
+    const BASE_URL = 'http://localhost:5000';
+    const flaskRes = await fetch(`${BASE_URL}/detect-ai/batch`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ documents }),
